@@ -7,9 +7,30 @@ import (
 )
 
 func main() {
-	const IP = "37.27.51.34"
-	const PORT = 6688
+	for {
+		var address string
+		var port int
 
+		fmt.Print("Enter address: ")
+		_, err := fmt.Scan(&address)
+		if err != nil {
+			fmt.Println("Err Scan:", err)
+			return
+		}
+
+		fmt.Print("Enter port: ")
+		_, err = fmt.Scan(&port)
+		if err != nil {
+			fmt.Println("Err Scan:", err)
+			return
+		}
+
+		stunRequest(address, port)
+	}
+
+}
+
+func stunRequest(IP string, PORT int) {
 	remoteAddr, err := net.ResolveUDPAddr("udp4", IP+":"+fmt.Sprint(PORT))
 	if err != nil {
 		fmt.Println("Err ResolveUDPAddr:", err)
