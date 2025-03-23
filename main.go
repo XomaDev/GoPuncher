@@ -3,18 +3,37 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/dgraph-io/ristretto"
 	"net"
 	"os"
+	"time"
 )
 
-type ReplyPacket struct {
-	IP   string `json:"IP"`
-	PORT int    `json:"PORT"`
+type RequestPacket struct {
+	ID   string `json:"ID"`
+	FIND bool   `json:"FIND"`
 }
 
+type ReplyPacket struct {
+	SUCCESS bool   `json:"SUCCESS"`
+	IP      string `json:"IP"`
+	PORT    int    `json:"PORT"`
+}
+
+const PORT = 6688
+
 func main() {
-	const port = 6688
-	addr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:"+fmt.Sprint(port))
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,       // Number of keys to track frequency
+		MaxCost:     100 << 20, // 100MB max cache size
+		BufferItems: 64,        // Number of keys per eviction buffer
+	})
+	if err != nil {
+		fmt.Println("Err NewCache:", err)
+		os.Exit(1)
+	}
+
+	addr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:"+fmt.Sprint(PORT))
 	if err != nil {
 		fmt.Println("Error ResolveUDPAddr:", err)
 		os.Exit(1)
@@ -26,9 +45,9 @@ func main() {
 	}
 
 	defer conn.Close()
-	fmt.Println("Listening on port", port)
+	fmt.Println("Listening on port", PORT)
 
-	buffer := make([]byte, 1024)
+	buffer := make([]byte, 50)
 	for {
 		n, addr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
@@ -36,11 +55,40 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("Received %s from %s\n", string(buffer[:n]), addr.String())
+		var request RequestPacket
+		err = json.Unmarshal(buffer[:n], &request)
+		if err != nil {
+			fmt.Println("Received bad JSON:", err)
+			continue
+		}
 
-		reply := ReplyPacket{
-			IP:   addr.IP.String(),
-			PORT: addr.Port,
+		var reply ReplyPacket
+		var success bool
+
+		if request.FIND {
+			// We gotta connect to 'em!
+			if val, found := cache.Get(request.ID); found {
+				cache.Del(request.ID)
+				reply = val.(ReplyPacket)
+				success = true
+			}
+		} else {
+			// Someone wants to connect to us!
+			reply = ReplyPacket{
+				SUCCESS: true,
+				IP:      addr.IP.String(),
+				PORT:    addr.Port,
+			}
+			success = true
+
+			cache.SetWithTTL(request.ID, reply, 1, 15*time.Second)
+		}
+		if !success {
+			reply = ReplyPacket{
+				SUCCESS: false,
+				IP:      "",
+				PORT:    0,
+			}
 		}
 
 		jsonData, err := json.Marshal(reply)
@@ -48,7 +96,7 @@ func main() {
 			fmt.Println("Error Marshal:", err)
 			continue
 		}
-		fmt.Println(string(jsonData))
+
 		_, err = conn.WriteToUDP(jsonData, addr)
 		if err != nil {
 			fmt.Println("Error WriteToUDP:", err)
