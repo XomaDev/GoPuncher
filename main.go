@@ -6,6 +6,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 	"net"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -20,9 +21,13 @@ type ReplyPacket struct {
 	PORT    int    `json:"PORT"`
 }
 
-const PORT = 6688
-
 func main() {
+	port := 8242
+	if len(os.Args) > 1 {
+		if p, err := strconv.Atoi(os.Args[1]); err == nil {
+			port = p
+		}
+	}
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,       // Number of keys to track frequency
 		MaxCost:     100 << 20, // 100MB max cache size
@@ -33,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	addr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:"+fmt.Sprint(PORT))
+	addr, err := net.ResolveUDPAddr("udp4", "0.0.0.0:"+fmt.Sprint(port))
 	if err != nil {
 		fmt.Println("Error ResolveUDPAddr:", err)
 		os.Exit(1)
@@ -45,7 +50,7 @@ func main() {
 	}
 
 	defer conn.Close()
-	fmt.Println("Listening on port", PORT)
+	fmt.Println("Listening on port", port)
 
 	buffer := make([]byte, 50)
 	for {
